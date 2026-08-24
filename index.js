@@ -32,6 +32,11 @@ async function initMongoDB() {
 
 initMongoDB();
 
+// Health check
+app.get('/api/health', (req, res) => {
+    res.json({ success: true, message: "Server is running" });
+});
+
 // 1. Account Registration (Create Account)
 app.post('/api/register', async (req, res) => {
     try {
@@ -110,13 +115,63 @@ app.post('/api/profile', async (req, res) => {
     }
 });
 
-// Transactions Sync
+// ==================== HOME ACCOUNTS ====================
+
+app.post('/api/accounts', async (req, res) => {
+    try {
+        const acc = req.body;
+        await accountsCollection.updateOne({ id: acc.id }, { $set: acc }, { upsert: true });
+        console.log(`✅ MongoDB Atlas: Account saved -> ${acc.title}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// GET /api/accounts?emailOrPhone=user@email.com
+app.get('/api/accounts', async (req, res) => {
+    try {
+        const email = (req.query.emailOrPhone || req.query.userEmail || req.query.email || "").trim();
+        const query = email ? { $or: [{ emailOrPhone: email }, { userEmail: email }] } : {};
+        const accounts = await accountsCollection.find(query).toArray();
+        console.log(`✅ MongoDB Atlas: Fetched ${accounts.length} accounts for ${email}`);
+        res.json({ success: true, accounts: accounts });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.delete('/api/accounts/:id', async (req, res) => {
+    try {
+        await accountsCollection.deleteOne({ id: req.params.id });
+        console.log(`✅ MongoDB Atlas: Deleted account ${req.params.id}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ==================== TRANSACTIONS ====================
+
 app.post('/api/transactions', async (req, res) => {
     try {
         const tx = req.body;
         await transactionsCollection.updateOne({ id: tx.id }, { $set: tx }, { upsert: true });
         console.log(`✅ MongoDB Atlas: Transaction saved -> ${tx.category} (${tx.amount})`);
         res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// GET /api/transactions?emailOrPhone=user@email.com
+app.get('/api/transactions', async (req, res) => {
+    try {
+        const email = (req.query.emailOrPhone || req.query.userEmail || req.query.email || "").trim();
+        const query = email ? { $or: [{ emailOrPhone: email }, { userEmail: email }] } : {};
+        const transactions = await transactionsCollection.find(query).toArray();
+        console.log(`✅ MongoDB Atlas: Fetched ${transactions.length} transactions for ${email}`);
+        res.json({ success: true, transactions: transactions });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -132,13 +187,27 @@ app.delete('/api/transactions/:id', async (req, res) => {
     }
 });
 
-// Customers Sync
+// ==================== CUSTOMERS ====================
+
 app.post('/api/customers', async (req, res) => {
     try {
         const cust = req.body;
         await customersCollection.updateOne({ id: cust.id }, { $set: cust }, { upsert: true });
         console.log(`✅ MongoDB Atlas: Customer saved -> ${cust.name}`);
         res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// GET /api/customers?emailOrPhone=user@email.com
+app.get('/api/customers', async (req, res) => {
+    try {
+        const email = (req.query.emailOrPhone || req.query.userEmail || req.query.email || "").trim();
+        const query = email ? { $or: [{ emailOrPhone: email }, { userEmail: email }] } : {};
+        const customers = await customersCollection.find(query).toArray();
+        console.log(`✅ MongoDB Atlas: Fetched ${customers.length} customers for ${email}`);
+        res.json({ success: true, customers: customers });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -155,7 +224,8 @@ app.delete('/api/customers/:id', async (req, res) => {
     }
 });
 
-// Customer Ledgers Sync
+// ==================== CUSTOMER LEDGERS ====================
+
 app.post('/api/customer_ledgers', async (req, res) => {
     try {
         const entry = req.body;
@@ -167,13 +237,40 @@ app.post('/api/customer_ledgers', async (req, res) => {
     }
 });
 
-// Loans Sync
+// GET /api/customer_ledgers?emailOrPhone=user@email.com
+app.get('/api/customer_ledgers', async (req, res) => {
+    try {
+        const email = (req.query.emailOrPhone || req.query.userEmail || req.query.email || "").trim();
+        const query = email ? { $or: [{ emailOrPhone: email }, { userEmail: email }] } : {};
+        const ledgers = await ledgersCollection.find(query).toArray();
+        console.log(`✅ MongoDB Atlas: Fetched ${ledgers.length} ledger entries for ${email}`);
+        res.json({ success: true, ledgers: ledgers });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ==================== LOANS ====================
+
 app.post('/api/loans', async (req, res) => {
     try {
         const loan = req.body;
         await loansCollection.updateOne({ id: loan.id }, { $set: loan }, { upsert: true });
         console.log(`✅ MongoDB Atlas: Loan tracker saved -> ${loan.title}`);
         res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// GET /api/loans?emailOrPhone=user@email.com
+app.get('/api/loans', async (req, res) => {
+    try {
+        const email = (req.query.emailOrPhone || req.query.userEmail || req.query.email || "").trim();
+        const query = email ? { $or: [{ emailOrPhone: email }, { userEmail: email }] } : {};
+        const loans = await loansCollection.find(query).toArray();
+        console.log(`✅ MongoDB Atlas: Fetched ${loans.length} loans for ${email}`);
+        res.json({ success: true, loans: loans });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
