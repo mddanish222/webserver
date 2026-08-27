@@ -10,7 +10,7 @@ app.use(express.json());
 const mongoUri = process.env.MONGODB_URI || "mongodb+srv://noor04aysha_db_user:SFQdNBtEEEaPdliG@moneymanager.lbu1gkg.mongodb.net/FinanceDB?retryWrites=true&w=majority";
 const client = new MongoClient(mongoUri);
 
-let db, usersCollection, accountsCollection, transactionsCollection, customersCollection, ledgersCollection, loansCollection, remindersCollection;
+let db, usersCollection, accountsCollection, transactionsCollection, customersCollection, ledgersCollection, loansCollection, remindersCollection, employeesCollection, employeeTxCollection;
 
 async function initMongoDB() {
     try {
@@ -23,9 +23,11 @@ async function initMongoDB() {
         ledgersCollection = db.collection("customer_ledgers");
         loansCollection = db.collection("loans");
         remindersCollection = db.collection("reminders");
+        employeesCollection = db.collection("employees");
+        employeeTxCollection = db.collection("employee_transactions");
 
         console.log("⚡ Connected successfully to MongoDB Atlas Cloud Cluster!");
-        console.log("📁 Database 'FinanceDB' active with collections: users, home_accounts, transactions, customers, customer_ledgers, loans, reminders");
+        console.log("📁 Database 'FinanceDB' active with collections: users, home_accounts, transactions, customers, customer_ledgers, loans, reminders, employees, employee_transactions");
     } catch (err) {
         console.error("❌ MongoDB Atlas Connection Error:", err);
     }
@@ -321,6 +323,77 @@ app.put('/api/reminders/:id', async (req, res) => {
             { $set: { isSent: true, sentAt: Date.now() } }
         );
         console.log(`✅ MongoDB Atlas: Reminder ${req.params.id} marked as sent`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ==================== EMPLOYEES ====================
+
+app.post('/api/employees', async (req, res) => {
+    try {
+        const emp = req.body;
+        await employeesCollection.updateOne({ id: emp.id }, { $set: emp }, { upsert: true });
+        console.log(`✅ MongoDB Atlas: Employee saved ${emp.name}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/employees', async (req, res) => {
+    try {
+        const email = (req.query.emailOrPhone || req.query.userEmail || req.query.email || "").trim();
+        const query = email ? { $or: [{ emailOrPhone: email }, { userEmail: email }] } : {};
+        const employees = await employeesCollection.find(query).toArray();
+        console.log(`✅ MongoDB Atlas: Fetched ${employees.length} employees for ${email}`);
+        res.json({ success: true, employees: employees });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.delete('/api/employees/:id', async (req, res) => {
+    try {
+        await employeesCollection.deleteOne({ id: req.params.id });
+        await employeeTxCollection.deleteMany({ employeeId: req.params.id });
+        console.log(`✅ MongoDB Atlas: Employee ${req.params.id} deleted`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ==================== EMPLOYEE TRANSACTIONS ====================
+
+app.post('/api/employee-transactions', async (req, res) => {
+    try {
+        const tx = req.body;
+        await employeeTxCollection.updateOne({ id: tx.id }, { $set: tx }, { upsert: true });
+        console.log(`✅ MongoDB Atlas: Employee Tx saved ${tx.type} for employee ${tx.employeeId}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/api/employee-transactions', async (req, res) => {
+    try {
+        const email = (req.query.emailOrPhone || req.query.userEmail || req.query.email || "").trim();
+        const query = email ? { $or: [{ emailOrPhone: email }, { userEmail: email }] } : {};
+        const txs = await employeeTxCollection.find(query).toArray();
+        console.log(`✅ MongoDB Atlas: Fetched ${txs.length} employee transactions for ${email}`);
+        res.json({ success: true, employeeTransactions: txs });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.delete('/api/employee-transactions/:id', async (req, res) => {
+    try {
+        await employeeTxCollection.deleteOne({ id: req.params.id });
+        console.log(`✅ MongoDB Atlas: Employee Tx ${req.params.id} deleted`);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
