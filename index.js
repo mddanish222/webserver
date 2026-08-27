@@ -10,7 +10,7 @@ app.use(express.json());
 const mongoUri = process.env.MONGODB_URI || "mongodb+srv://noor04aysha_db_user:SFQdNBtEEEaPdliG@moneymanager.lbu1gkg.mongodb.net/FinanceDB?retryWrites=true&w=majority";
 const client = new MongoClient(mongoUri);
 
-let db, usersCollection, accountsCollection, transactionsCollection, customersCollection, ledgersCollection, loansCollection;
+let db, usersCollection, accountsCollection, transactionsCollection, customersCollection, ledgersCollection, loansCollection, remindersCollection;
 
 async function initMongoDB() {
     try {
@@ -22,9 +22,10 @@ async function initMongoDB() {
         customersCollection = db.collection("customers");
         ledgersCollection = db.collection("customer_ledgers");
         loansCollection = db.collection("loans");
+        remindersCollection = db.collection("reminders");
 
         console.log("⚡ Connected successfully to MongoDB Atlas Cloud Cluster!");
-        console.log("📁 Database 'FinanceDB' active with collections: users, home_accounts, transactions, customers, customer_ledgers, loans");
+        console.log("📁 Database 'FinanceDB' active with collections: users, home_accounts, transactions, customers, customer_ledgers, loans, reminders");
     } catch (err) {
         console.error("❌ MongoDB Atlas Connection Error:", err);
     }
@@ -280,6 +281,46 @@ app.delete('/api/loans/:id', async (req, res) => {
     try {
         await loansCollection.deleteOne({ id: req.params.id });
         console.log(`✅ MongoDB Atlas: Deleted loan ${req.params.id}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ==================== REMINDERS ====================
+
+app.post('/api/reminders', async (req, res) => {
+    try {
+        const reminder = req.body;
+        await remindersCollection.updateOne({ id: reminder.id }, { $set: reminder }, { upsert: true });
+        console.log(`✅ MongoDB Atlas: Reminder saved for ${reminder.customerName} at ${reminder.scheduledTimeMillis}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// GET /api/reminders?emailOrPhone=user@email.com
+app.get('/api/reminders', async (req, res) => {
+    try {
+        const email = (req.query.emailOrPhone || req.query.userEmail || req.query.email || "").trim();
+        const query = email ? { $or: [{ emailOrPhone: email }, { userEmail: email }] } : {};
+        const reminders = await remindersCollection.find(query).toArray();
+        console.log(`✅ MongoDB Atlas: Fetched ${reminders.length} reminders for ${email}`);
+        res.json({ success: true, reminders: reminders });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// PUT /api/reminders/:id  — mark as sent
+app.put('/api/reminders/:id', async (req, res) => {
+    try {
+        await remindersCollection.updateOne(
+            { id: req.params.id },
+            { $set: { isSent: true, sentAt: Date.now() } }
+        );
+        console.log(`✅ MongoDB Atlas: Reminder ${req.params.id} marked as sent`);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
