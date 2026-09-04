@@ -96,7 +96,7 @@ app.post('/api/login', async (req, res) => {
 // 3. Complete Profile & Currency Setup
 app.post('/api/profile', async (req, res) => {
     try {
-        const { emailOrPhone, name, businessName, currencyCode } = req.body;
+        const { emailOrPhone, name, businessName, currencyCode, upiId } = req.body;
         await usersCollection.updateOne(
             { emailOrPhone: emailOrPhone },
             {
@@ -104,6 +104,7 @@ app.post('/api/profile', async (req, res) => {
                     name,
                     businessName,
                     currencyCode,
+                    upiId: upiId || "",
                     isProfileComplete: true
                 }
             },
@@ -431,6 +432,20 @@ app.get('/p/:customerId', async (req, res) => {
             `);
         }
 
+        // Fetch shop owner for UPI ID & shop name
+        let owner = null;
+        const ownerQuery = [
+            customer.userEmail ? { emailOrPhone: customer.userEmail.trim() } : null,
+            customer.emailOrPhone ? { emailOrPhone: customer.emailOrPhone.trim() } : null
+        ].filter(Boolean);
+
+        if (ownerQuery.length > 0) {
+            owner = await usersCollection.findOne({ $or: ownerQuery });
+        }
+
+        const shopUpiId = (req.query.upi || (owner && owner.upiId) || process.env.DEFAULT_UPI_ID || '').trim();
+        const shopNameStr = (owner && owner.businessName) ? owner.businessName : 'Shop';
+
         // Fetch ledgers for customer
         const ledgers = await ledgersCollection.find({ customerId: customerId }).sort({ timestamp: 1 }).toArray();
 
@@ -522,7 +537,7 @@ app.get('/p/:customerId', async (req, res) => {
     <div class="container">
         <div class="card">
             <div class="header">
-                <div class="shop-name">📖 CUSTOMER KHATA PASSBOOK</div>
+                <div class="shop-name">📖 ${shopNameStr.toUpperCase()} - KHATA PASSBOOK</div>
                 <div class="sub-title">Live Transaction History & Account Statement</div>
             </div>
 
@@ -541,7 +556,7 @@ app.get('/p/:customerId', async (req, res) => {
             </div>
 
             ${isNetDuePositive ? `
-                <a href="upi://pay?pa=&pn=${encodeURIComponent(customer.name)}&am=${netDue}&cu=INR&tn=${encodeURIComponent('Khata Balance Payment')}" class="upi-btn">
+                <a href="upi://pay?pa=${encodeURIComponent(shopUpiId)}&pn=${encodeURIComponent(shopNameStr)}&am=${netDue}&cu=INR&tn=${encodeURIComponent('Khata Balance Payment')}" class="upi-btn">
                     💳 Pay ₹${formattedNetDue} via UPI (GPay / PhonePe / Paytm)
                 </a>
             ` : ''}
