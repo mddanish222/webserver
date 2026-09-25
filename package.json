@@ -2,9 +2,10 @@
   "name": "finance-backend-server",
   "version": "1.0.0",
   "description": "MongoDB Atlas Backend API Server for Finance Master App",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
