@@ -156,8 +156,10 @@ async function login(req, res, next) {
                 currencyCode: found.currencyCode || "INR",
                 upiId: found.upiId || "",
                 role: found.role || "OWNER",
+                staffRoleTitle: found.staffRoleTitle || (found.role === "STAFF" ? "Cashier" : "Owner"),
                 ownerId: found.ownerId || found.id,
                 ownerEmail: found.ownerEmail || found.emailOrPhone,
+                permissions: found.permissions || null,
                 isProfileComplete: found.isProfileComplete || false,
                 token: token
             },
@@ -224,7 +226,7 @@ async function createStaff(req, res, next) {
     try {
         const { usersCollection } = getCollections();
         const owner = req.user; // Authenticated owner
-        const { staffName, staffPhoneOrEmail, staffPin, staffRole } = req.body;
+        const { staffName, staffPhoneOrEmail, staffPin, staffRole, permissions } = req.body;
 
         if (!staffName || !staffPhoneOrEmail || !staffPin) {
             return res.status(400).json({ success: false, message: "Staff name, phone/email, and PIN are required." });
@@ -239,6 +241,15 @@ async function createStaff(req, res, next) {
         const salt = await bcrypt.genSalt(10);
         const hashedPin = await bcrypt.hash(staffPin.trim(), salt);
 
+        // Default permissions: everything restricted/off by default for security
+        const defaultPermissions = {
+            canViewEmployeeWages: false,
+            canViewSupplierKhata: false,
+            canViewCostPrice: false,
+            canDeleteTransactions: false,
+        };
+        const staffPermissions = permissions ? { ...defaultPermissions, ...permissions } : defaultPermissions;
+
         const staffUser = {
             id: "stf_" + Date.now(),
             emailOrPhone: cleanInput,
@@ -251,6 +262,7 @@ async function createStaff(req, res, next) {
             staffRoleTitle: staffRole || "Cashier",
             ownerId: owner.userId || owner.id,
             ownerEmail: owner.emailOrPhone,
+            permissions: staffPermissions,
             isProfileComplete: true,
             createdAt: Date.now()
         };
@@ -268,6 +280,7 @@ async function createStaff(req, res, next) {
                 role: staffUser.role,
                 staffRoleTitle: staffUser.staffRoleTitle,
                 ownerId: staffUser.ownerId,
+                permissions: staffUser.permissions,
                 createdAt: staffUser.createdAt
             }
         });
@@ -323,11 +336,51 @@ async function deleteStaffMember(req, res, next) {
     }
 }
 
+async function updateStaffPermissions(req, res, next) {
+    try {
+        const { usersCollection } = getCollections();
+        const owner = req.user;
+        const staffId = req.params.id;
+        const ownerId = owner.userId || owner.id;
+        const { permissions } = req.body;
+
+        if (!permissions || typeof permissions !== 'object') {
+            return res.status(400).json({ success: false, message: "Permissions object required." });
+        }
+
+        const sanitized = {
+            canViewEmployeeWages: Boolean(permissions.canViewEmployeeWages),
+            canViewSupplierKhata: Boolean(permissions.canViewSupplierKhata),
+            canViewCostPrice: Boolean(permissions.canViewCostPrice),
+            canDeleteTransactions: Boolean(permissions.canDeleteTransactions),
+        };
+
+        const result = await usersCollection.updateOne(
+            {
+                id: staffId,
+                role: "STAFF",
+                $or: [{ ownerId: ownerId }, { ownerEmail: owner.emailOrPhone }]
+            },
+            { $set: { permissions: sanitized } }
+        );
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ success: false, message: "Staff member not found or permission denied." });
+        }
+
+        console.log(`✅ MongoDB Atlas: Owner ${owner.emailOrPhone} updated permissions for STAFF ${staffId}`);
+        res.json({ success: true, message: "Staff permissions updated.", permissions: sanitized });
+    } catch (err) {
+        next(err);
+    }
+}
+
 module.exports = {
     register,
     login,
     updateProfile,
     createStaff,
     getStaffMembers,
-    deleteStaffMember
+    deleteStaffMember,
+    updateStaffPermissions
 };

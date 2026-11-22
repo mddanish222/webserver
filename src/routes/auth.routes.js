@@ -11,5 +11,6 @@ router.post('/profile', authController.updateProfile);
 router.post('/staff', authenticateToken, requireRole(['OWNER']), authController.createStaff);
 router.get('/staff', authenticateToken, requireRole(['OWNER']), authController.getStaffMembers);
 router.delete('/staff/:id', authenticateToken, requireRole(['OWNER']), authController.deleteStaffMember);
+router.put('/staff/:id/permissions', authenticateToken, requireRole(['OWNER']), authController.updateStaffPermissions);
 
 module.exports = router;
