@@ -78,6 +78,7 @@ async function connectDB() {
         collections.suppliersCollection = db.collection("suppliers");
         collections.supplierLedgersCollection = db.collection("supplier_ledgers");
         collections.stockSalesCollection = db.collection("stock_sales");
+        collections.countersCollection = db.collection("counters");
 
         console.log("⚡ Connected successfully to MongoDB Atlas Cloud Cluster!");
         console.log("📁 Database 'FinanceDB' active with full collections schema.");

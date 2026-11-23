@@ -12,6 +12,8 @@ async function saveTransaction(req, res, next) {
         tx.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
         tx.recordedBy = req.user.name || req.user.emailOrPhone;
         tx.recordedByRole = req.user.role || 'OWNER';
+        tx.updatedAt = Date.now();
+        tx.isDeleted = false;
 
         await transactionsCollection.updateOne({ id: tx.id }, { $set: tx }, { upsert: true });
         console.log(`✅ MongoDB Atlas: Transaction saved -> ${tx.category} (Amount: ${tx.amount}) by ${tx.recordedBy}`);
@@ -59,22 +61,27 @@ async function deleteTransaction(req, res, next) {
         const tenantIds = getTenantIdentifiers(req);
         const txId = req.params.id;
 
-        // Verify resource ownership before deleting
-        const result = await transactionsCollection.deleteOne({
-            id: txId,
-            $or: [
-                { ownerId: { $in: tenantIds } },
-                { userEmail: { $in: tenantIds } },
-                { emailOrPhone: { $in: tenantIds } },
-                { userId: { $in: tenantIds } }
-            ]
-        });
+        // Soft-delete (tombstone) to synchronize deletion across all mobile devices
+        const result = await transactionsCollection.updateOne(
+            {
+                id: txId,
+                $or: [
+                    { ownerId: { $in: tenantIds } },
+                    { userEmail: { $in: tenantIds } },
+                    { emailOrPhone: { $in: tenantIds } },
+                    { userId: { $in: tenantIds } }
+                ]
+            },
+            {
+                $set: { isDeleted: true, updatedAt: Date.now() }
+            }
+        );
 
-        if (result.deletedCount === 0) {
+        if (result.matchedCount === 0) {
             return res.status(404).json({ success: false, message: "Transaction not found or permission denied." });
         }
 
-        console.log(`✅ MongoDB Atlas: Deleted transaction ${txId} for tenant [${tenantIds.join(', ')}]`);
+        console.log(`✅ MongoDB Atlas: Soft-deleted (tombstoned) transaction ${txId} for tenant [${tenantIds.join(', ')}]`);
         res.json({ success: true });
     } catch (err) {
         next(err);

@@ -9,6 +9,8 @@ async function saveCustomer(req, res, next) {
         cust.ownerId = req.user.ownerId || req.user.userId || req.user.id;
         cust.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
         cust.recordedBy = req.user.name || req.user.emailOrPhone;
+        cust.updatedAt = Date.now();
+        cust.isDeleted = false;
 
         await customersCollection.updateOne({ id: cust.id }, { $set: cust }, { upsert: true });
         console.log(`✅ MongoDB Atlas: Customer saved -> ${cust.name} for tenant ${cust.ownerId}`);
@@ -54,22 +56,30 @@ async function deleteCustomer(req, res, next) {
         const tenantIds = getTenantIdentifiers(req);
         const custId = req.params.id;
 
-        const result = await customersCollection.deleteOne({
-            id: custId,
-            $or: [
-                { ownerId: { $in: tenantIds } },
-                { userEmail: { $in: tenantIds } },
-                { emailOrPhone: { $in: tenantIds } },
-                { userId: { $in: tenantIds } }
-            ]
-        });
+        const result = await customersCollection.updateOne(
+            {
+                id: custId,
+                $or: [
+                    { ownerId: { $in: tenantIds } },
+                    { userEmail: { $in: tenantIds } },
+                    { emailOrPhone: { $in: tenantIds } },
+                    { userId: { $in: tenantIds } }
+                ]
+            },
+            {
+                $set: { isDeleted: true, updatedAt: Date.now() }
+            }
+        );
 
-        if (result.deletedCount === 0) {
+        if (result.matchedCount === 0) {
             return res.status(404).json({ success: false, message: "Customer not found or permission denied." });
         }
 
-        await ledgersCollection.deleteMany({ customerId: custId });
-        console.log(`✅ MongoDB Atlas: Deleted customer ${custId} and their ledgers`);
+        await ledgersCollection.updateMany(
+            { customerId: custId },
+            { $set: { isDeleted: true, updatedAt: Date.now() } }
+        );
+        console.log(`✅ MongoDB Atlas: Soft-deleted (tombstoned) customer ${custId} and their ledgers`);
         res.json({ success: true });
     } catch (err) {
         next(err);
@@ -86,6 +96,8 @@ async function saveCustomerLedger(req, res, next) {
         entry.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
         entry.recordedBy = req.user.name || req.user.emailOrPhone;
         entry.recordedByRole = req.user.role || 'OWNER';
+        entry.updatedAt = Date.now();
+        entry.isDeleted = false;
 
         await ledgersCollection.updateOne({ id: entry.id }, { $set: entry }, { upsert: true });
         console.log(`✅ MongoDB Atlas: Customer ledger logged -> ${entry.amount} (Recorded by ${entry.recordedBy})`);
@@ -128,6 +140,8 @@ async function saveSupplier(req, res, next) {
         const supp = req.body;
         supp.ownerId = req.user.ownerId || req.user.userId || req.user.id;
         supp.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
+        supp.updatedAt = Date.now();
+        supp.isDeleted = false;
 
         await suppliersCollection.updateOne({ id: supp.id }, { $set: supp }, { upsert: true });
         console.log(`✅ MongoDB Atlas: Supplier saved -> ${supp.name}`);
@@ -172,21 +186,29 @@ async function deleteSupplier(req, res, next) {
         const tenantIds = getTenantIdentifiers(req);
         const suppId = req.params.id;
 
-        const result = await suppliersCollection.deleteOne({
-            id: suppId,
-            $or: [
-                { ownerId: { $in: tenantIds } },
-                { userEmail: { $in: tenantIds } },
-                { emailOrPhone: { $in: tenantIds } },
-                { userId: { $in: tenantIds } }
-            ]
-        });
+        const result = await suppliersCollection.updateOne(
+            {
+                id: suppId,
+                $or: [
+                    { ownerId: { $in: tenantIds } },
+                    { userEmail: { $in: tenantIds } },
+                    { emailOrPhone: { $in: tenantIds } },
+                    { userId: { $in: tenantIds } }
+                ]
+            },
+            {
+                $set: { isDeleted: true, updatedAt: Date.now() }
+            }
+        );
 
-        if (result.deletedCount === 0) {
+        if (result.matchedCount === 0) {
             return res.status(404).json({ success: false, message: "Supplier not found or permission denied." });
         }
 
-        await supplierLedgersCollection.deleteMany({ supplierId: suppId });
+        await supplierLedgersCollection.updateMany(
+            { supplierId: suppId },
+            { $set: { isDeleted: true, updatedAt: Date.now() } }
+        );
         res.json({ success: true });
     } catch (err) {
         next(err);
@@ -200,6 +222,8 @@ async function saveSupplierLedger(req, res, next) {
         const entry = req.body;
         entry.ownerId = req.user.ownerId || req.user.userId || req.user.id;
         entry.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
+        entry.updatedAt = Date.now();
+        entry.isDeleted = false;
 
         await supplierLedgersCollection.updateOne({ id: entry.id }, { $set: entry }, { upsert: true });
         res.json({ success: true });
@@ -241,6 +265,8 @@ async function saveStockSale(req, res, next) {
         sale.ownerId = req.user.ownerId || req.user.userId || req.user.id;
         sale.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
         sale.recordedBy = req.user.name || req.user.emailOrPhone;
+        sale.updatedAt = Date.now();
+        sale.isDeleted = false;
 
         await stockSalesCollection.updateOne({ id: sale.id }, { $set: sale }, { upsert: true });
         res.json({ success: true });

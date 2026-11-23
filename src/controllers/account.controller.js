@@ -11,6 +11,8 @@ async function saveAccount(req, res, next) {
         const acc = req.body;
         acc.ownerId = req.user.ownerId || req.user.userId || req.user.id;
         acc.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
+        acc.updatedAt = Date.now();
+        acc.isDeleted = false;
 
         await accountsCollection.updateOne({ id: acc.id }, { $set: acc }, { upsert: true });
         console.log(`✅ MongoDB Atlas: Account saved -> ${acc.title} for ${acc.userEmail}`);

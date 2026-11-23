@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { getCollections } = require('../config/db');
-const { JWT_SECRET } = require('../config/env');
+const { JWT_SECRET, JWT_ACCESS_EXPIRY } = require('../config/env');
 
 function generateToken(user) {
     const payload = {
@@ -12,9 +12,10 @@ function generateToken(user) {
         businessName: user.businessName || '',
         role: user.role || 'OWNER',
         ownerId: user.ownerId || user.id,
-        ownerEmail: user.ownerEmail || user.emailOrPhone
+        ownerEmail: user.ownerEmail || user.emailOrPhone,
+        tokenVersion: user.tokenVersion || 1
     };
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: '60d' });
+    return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_ACCESS_EXPIRY || '7d' });
 }
 
 async function register(req, res, next) {
@@ -155,6 +156,12 @@ async function login(req, res, next) {
                 address: found.address || "",
                 currencyCode: found.currencyCode || "INR",
                 upiId: found.upiId || "",
+                gstin: found.gstin || "",
+                bankName: found.bankName || "",
+                bankAccountNumber: found.bankAccountNumber || "",
+                bankIfsc: found.bankIfsc || "",
+                bankBranch: found.bankBranch || "",
+                showStaffAuditBadge: found.showStaffAuditBadge !== undefined ? found.showStaffAuditBadge : true,
                 role: found.role || "OWNER",
                 staffRoleTitle: found.staffRoleTitle || (found.role === "STAFF" ? "Cashier" : "Owner"),
                 ownerId: found.ownerId || found.id,
@@ -173,25 +180,44 @@ async function login(req, res, next) {
 async function updateProfile(req, res, next) {
     try {
         const { usersCollection } = getCollections();
-        const { emailOrPhone, name, businessName, address, currencyCode, upiId } = req.body;
+        const {
+            emailOrPhone,
+            name,
+            businessName,
+            address,
+            currencyCode,
+            upiId,
+            gstin,
+            bankName,
+            bankAccountNumber,
+            bankIfsc,
+            bankBranch,
+            showStaffAuditBadge
+        } = req.body;
         const targetEmail = (emailOrPhone || (req.user && req.user.emailOrPhone) || "").trim();
 
         if (!targetEmail) {
             return res.status(400).json({ success: false, message: "Email required for profile update" });
         }
 
+        const updateFields = {
+            name: name || "",
+            businessName: businessName || "",
+            address: address || "",
+            currencyCode: currencyCode || "INR",
+            upiId: upiId || "",
+            isProfileComplete: true
+        };
+        if (gstin !== undefined) updateFields.gstin = gstin.trim();
+        if (bankName !== undefined) updateFields.bankName = bankName.trim();
+        if (bankAccountNumber !== undefined) updateFields.bankAccountNumber = bankAccountNumber.trim();
+        if (bankIfsc !== undefined) updateFields.bankIfsc = bankIfsc.trim();
+        if (bankBranch !== undefined) updateFields.bankBranch = bankBranch.trim();
+        if (showStaffAuditBadge !== undefined) updateFields.showStaffAuditBadge = Boolean(showStaffAuditBadge);
+
         await usersCollection.updateOne(
             { emailOrPhone: targetEmail },
-            {
-                $set: {
-                    name: name || "",
-                    businessName: businessName || "",
-                    address: address || "",
-                    currencyCode: currencyCode || "INR",
-                    upiId: upiId || "",
-                    isProfileComplete: true
-                }
-            },
+            { $set: updateFields },
             { upsert: true }
         );
 
@@ -209,6 +235,12 @@ async function updateProfile(req, res, next) {
                 address: updatedUser.address,
                 currencyCode: updatedUser.currencyCode,
                 upiId: updatedUser.upiId,
+                gstin: updatedUser.gstin || "",
+                bankName: updatedUser.bankName || "",
+                bankAccountNumber: updatedUser.bankAccountNumber || "",
+                bankIfsc: updatedUser.bankIfsc || "",
+                bankBranch: updatedUser.bankBranch || "",
+                showStaffAuditBadge: updatedUser.showStaffAuditBadge !== undefined ? updatedUser.showStaffAuditBadge : true,
                 role: updatedUser.role || "OWNER",
                 ownerId: updatedUser.ownerId || updatedUser.id,
                 isProfileComplete: true,
@@ -241,11 +273,13 @@ async function createStaff(req, res, next) {
         const salt = await bcrypt.genSalt(10);
         const hashedPin = await bcrypt.hash(staffPin.trim(), salt);
 
-        // Default permissions: everything restricted/off by default for security
+        // Default permissions: Customer khata and billing enabled by default, rest restricted
         const defaultPermissions = {
-            canViewEmployeeWages: false,
+            canViewCustomerKhata: true,
             canViewSupplierKhata: false,
+            canViewEmployeeWages: false,
             canViewCostPrice: false,
+            canCreateBills: true,
             canDeleteTransactions: false,
         };
         const staffPermissions = permissions ? { ...defaultPermissions, ...permissions } : defaultPermissions;
@@ -349,9 +383,11 @@ async function updateStaffPermissions(req, res, next) {
         }
 
         const sanitized = {
-            canViewEmployeeWages: Boolean(permissions.canViewEmployeeWages),
+            canViewCustomerKhata: permissions.canViewCustomerKhata !== undefined ? Boolean(permissions.canViewCustomerKhata) : true,
             canViewSupplierKhata: Boolean(permissions.canViewSupplierKhata),
+            canViewEmployeeWages: Boolean(permissions.canViewEmployeeWages),
             canViewCostPrice: Boolean(permissions.canViewCostPrice),
+            canCreateBills: permissions.canCreateBills !== undefined ? Boolean(permissions.canCreateBills) : true,
             canDeleteTransactions: Boolean(permissions.canDeleteTransactions),
         };
 
@@ -361,7 +397,10 @@ async function updateStaffPermissions(req, res, next) {
                 role: "STAFF",
                 $or: [{ ownerId: ownerId }, { ownerEmail: owner.emailOrPhone }]
             },
-            { $set: { permissions: sanitized } }
+            {
+                $set: { permissions: sanitized },
+                $inc: { tokenVersion: 1 }
+            }
         );
 
         if (result.matchedCount === 0) {
@@ -375,6 +414,44 @@ async function updateStaffPermissions(req, res, next) {
     }
 }
 
+async function resetStaffPin(req, res, next) {
+    try {
+        const { usersCollection } = getCollections();
+        const owner = req.user;
+        const staffId = req.params.id;
+        const { newPin } = req.body;
+        const ownerId = owner.userId || owner.id;
+
+        if (!newPin || newPin.trim().length < 4) {
+            return res.status(400).json({ success: false, message: "New PIN must be at least 4 digits" });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPin = await bcrypt.hash(newPin.trim(), salt);
+
+        const result = await usersCollection.updateOne(
+            {
+                id: staffId,
+                role: "STAFF",
+                $or: [{ ownerId: ownerId }, { ownerEmail: owner.emailOrPhone }]
+            },
+            {
+                $set: { passwordHash: hashedPin, pinUpdatedBy: owner.emailOrPhone, pinUpdatedAt: Date.now() },
+                $inc: { tokenVersion: 1 }
+            }
+        );
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ success: false, message: "Staff member not found or permission denied." });
+        }
+
+        console.log(`🔒 Owner ${owner.emailOrPhone} reset PIN for STAFF ${staffId}`);
+        res.json({ success: true, message: "Staff PIN reset successfully." });
+    } catch (err) {
+        next(err);
+    }
+}
+
 module.exports = {
     register,
     login,
@@ -382,5 +459,6 @@ module.exports = {
     createStaff,
     getStaffMembers,
     deleteStaffMember,
-    updateStaffPermissions
+    updateStaffPermissions,
+    resetStaffPin
 };

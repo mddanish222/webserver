@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { JWT_SECRET } = require('../config/env');
 
-function authenticateToken(req, res, next) {
+async function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'] || req.headers['x-auth-token'];
     let token = null;
 
@@ -22,7 +22,32 @@ function authenticateToken(req, res, next) {
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        req.user = decoded; // { userId, emailOrPhone, role, ownerId, name }
+        req.user = decoded; // { userId, emailOrPhone, role, ownerId, name, tokenVersion }
+
+        // Real-time security revocation check for STAFF users to enforce immediate lockout
+        if (decoded.role === 'STAFF') {
+            const { getCollections } = require('../config/db');
+            const { usersCollection } = getCollections();
+            const staffId = decoded.userId || decoded.id;
+            const liveUser = await usersCollection.findOne({ id: staffId, role: 'STAFF' });
+            
+            if (!liveUser) {
+                return res.status(401).json({
+                    success: false,
+                    message: "Staff account has been removed by the owner."
+                });
+            }
+            if (liveUser.tokenVersion && decoded.tokenVersion && liveUser.tokenVersion !== decoded.tokenVersion) {
+                return res.status(401).json({
+                    success: false,
+                    message: "Session expired due to security or permission update. Please sign in again."
+                });
+            }
+            if (liveUser.permissions) {
+                req.user.permissions = liveUser.permissions;
+            }
+        }
+
         next();
     } catch (err) {
         return res.status(401).json({
