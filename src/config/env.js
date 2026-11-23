@@ -19,5 +19,5 @@ module.exports = {
     MONGODB_URI: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/FinanceDB",
     DEFAULT_UPI_ID: (process.env.DEFAULT_UPI_ID || '').trim(),
     JWT_SECRET: process.env.JWT_SECRET || "FinanceMaster_Secret_JwtKey_#2026_Enterprise_SecureAuthToken",
-    JWT_ACCESS_EXPIRY: process.env.JWT_ACCESS_EXPIRY || '7d'
+    JWT_ACCESS_EXPIRY: process.env.JWT_ACCESS_EXPIRY || 'never'
 };

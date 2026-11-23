@@ -15,7 +15,11 @@ function generateToken(user) {
         ownerEmail: user.ownerEmail || user.emailOrPhone,
         tokenVersion: user.tokenVersion || 1
     };
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_ACCESS_EXPIRY || '7d' });
+    if (JWT_ACCESS_EXPIRY && JWT_ACCESS_EXPIRY !== 'never' && JWT_ACCESS_EXPIRY !== 'forever') {
+        return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_ACCESS_EXPIRY });
+    }
+    // Permanent session: Stays logged in indefinitely until manual logout or tokenVersion revocation
+    return jwt.sign(payload, JWT_SECRET);
 }
 
 async function register(req, res, next) {
