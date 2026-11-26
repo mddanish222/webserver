@@ -108,9 +108,12 @@ async function login(req, res, next) {
         }
 
         const cleanInput = emailOrPhone.trim();
+        const lowerInput = cleanInput.toLowerCase();
         const found = await usersCollection.findOne({
             $or: [
+                { username: lowerInput },
                 { emailOrPhone: cleanInput },
+                { emailOrPhone: lowerInput },
                 { id: cleanInput }
             ]
         });
@@ -148,6 +151,30 @@ async function login(req, res, next) {
         }
 
         console.log(`✅ MongoDB Atlas: Login verified -> ${found.emailOrPhone} (Role: ${found.role || 'OWNER'})`);
+
+        // If staff user, seamlessly inherit the owner's live business profile (Shop Name, GSTIN, Address, Bank, etc.)
+        if (found.role === 'STAFF') {
+            const ownerDoc = await usersCollection.findOne({
+                $or: [
+                    { id: found.ownerId },
+                    { emailOrPhone: found.ownerEmail },
+                    { emailOrPhone: found.ownerId }
+                ]
+            });
+            if (ownerDoc) {
+                found.businessName = ownerDoc.businessName || found.businessName || "";
+                found.address = ownerDoc.address || found.address || "";
+                found.currencyCode = ownerDoc.currencyCode || found.currencyCode || "INR";
+                found.upiId = ownerDoc.upiId || found.upiId || "";
+                found.gstin = ownerDoc.gstin || found.gstin || "";
+                found.bankName = ownerDoc.bankName || found.bankName || "";
+                found.bankAccountNumber = ownerDoc.bankAccountNumber || found.bankAccountNumber || "";
+                found.bankIfsc = ownerDoc.bankIfsc || found.bankIfsc || "";
+                found.bankBranch = ownerDoc.bankBranch || found.bankBranch || "";
+                found.showStaffAuditBadge = ownerDoc.showStaffAuditBadge !== undefined ? ownerDoc.showStaffAuditBadge : true;
+            }
+        }
+
         const token = generateToken(found);
 
         res.json({
@@ -155,6 +182,7 @@ async function login(req, res, next) {
             user: {
                 id: found.id,
                 emailOrPhone: found.emailOrPhone,
+                username: found.username || found.emailOrPhone || "",
                 name: found.name || "",
                 businessName: found.businessName || "",
                 address: found.address || "",
@@ -227,6 +255,36 @@ async function updateProfile(req, res, next) {
 
         const updatedUser = await usersCollection.findOne({ emailOrPhone: targetEmail });
         console.log(`✅ MongoDB Atlas: Profile updated for ${name} (${targetEmail})`);
+
+        // If the updated user is an Owner, propagate the updated business details to all staff members
+        if (updatedUser && updatedUser.role !== 'STAFF') {
+            const ownerId = updatedUser.userId || updatedUser.id;
+            const ownerEmail = updatedUser.emailOrPhone;
+            const staffSyncFields = {
+                businessName: updatedUser.businessName || "",
+                address: updatedUser.address || "",
+                currencyCode: updatedUser.currencyCode || "INR",
+                upiId: updatedUser.upiId || "",
+                gstin: updatedUser.gstin || "",
+                bankName: updatedUser.bankName || "",
+                bankAccountNumber: updatedUser.bankAccountNumber || "",
+                bankIfsc: updatedUser.bankIfsc || "",
+                bankBranch: updatedUser.bankBranch || "",
+                showStaffAuditBadge: updatedUser.showStaffAuditBadge !== undefined ? updatedUser.showStaffAuditBadge : true
+            };
+            await usersCollection.updateMany(
+                {
+                    role: "STAFF",
+                    $or: [
+                        { ownerId: ownerId },
+                        { ownerEmail: ownerEmail },
+                        { ownerId: ownerEmail }
+                    ]
+                },
+                { $set: staffSyncFields }
+            );
+            console.log(`⚡ MongoDB Atlas: Real-time synced owner profile to all staff under ${ownerEmail}`);
+        }
         
         const token = generateToken(updatedUser);
         res.json({
@@ -258,31 +316,182 @@ async function updateProfile(req, res, next) {
 }
 
 // ── Staff Management Endpoints (Owner Only) ──────────────────────────
+function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function findGlobalUsernameConflict(usersCollection, rawUsername, excludeStaffId = null) {
+    const clean = rawUsername.trim().toLowerCase();
+    const ciRegex = new RegExp(`^${escapeRegex(clean)}$`, 'i');
+    const matchExpr = {
+        $or: [
+            { username: clean },
+            { username: ciRegex },
+            { emailOrPhone: clean },
+            { emailOrPhone: ciRegex }
+        ]
+    };
+    if (excludeStaffId) {
+        return usersCollection.findOne({
+            $and: [
+                { id: { $ne: excludeStaffId } },
+                matchExpr
+            ]
+        });
+    }
+    return usersCollection.findOne(matchExpr);
+}
+
+async function generateUniqueUsernameSuggestions(usersCollection, raw) {
+    const clean = raw.trim().toLowerCase();
+    const candidates = [];
+
+    // 1. If ends with digits (e.g. md124 -> md125, md126, md1240), offer close numeric variants
+    const numMatch = clean.match(/^(.*?)(\d+)$/);
+    if (numMatch) {
+        const prefix = numMatch[1];
+        const baseNum = parseInt(numMatch[2], 10);
+        if (!Number.isNaN(baseNum)) {
+            candidates.push(`${prefix}${baseNum + 1}`);
+            candidates.push(`${prefix}${baseNum + 2}`);
+        }
+        if (prefix.length >= 2) {
+            candidates.push(`${prefix}_${numMatch[2]}`);
+        }
+    }
+
+    // 2. Classic Instagram-style suffixes & separators
+    const yr = new Date().getFullYear().toString().slice(-2);
+    candidates.push(
+        `${clean}_01`,
+        `${clean}_1`,
+        `${clean}_${yr}`,
+        `${clean}_shop`,
+        `${clean}_staff`,
+        `${clean}_pro`,
+        `its_${clean}`,
+        `${clean}_${Math.floor(10 + Math.random() * 89)}`,
+        `${clean}${Math.floor(100 + Math.random() * 899)}`
+    );
+
+    const uniqueOrdered = [];
+    for (const c of candidates) {
+        if (c && c !== clean && /^[a-z0-9_]{3,30}$/.test(c) && !uniqueOrdered.includes(c)) {
+            uniqueOrdered.push(c);
+        }
+    }
+
+    if (uniqueOrdered.length === 0) return [];
+
+    // Single batch query to filter out all already-taken candidates across all shops
+    const existingDocs = await usersCollection.find({
+        $or: [
+            { username: { $in: uniqueOrdered } },
+            { emailOrPhone: { $in: uniqueOrdered } }
+        ]
+    }).project({ username: 1, emailOrPhone: 1 }).toArray();
+
+    const takenSet = new Set();
+    for (const doc of existingDocs) {
+        if (doc.username) takenSet.add(String(doc.username).trim().toLowerCase());
+        if (doc.emailOrPhone) takenSet.add(String(doc.emailOrPhone).trim().toLowerCase());
+    }
+
+    return uniqueOrdered.filter(c => !takenSet.has(c)).slice(0, 5);
+}
+
+async function checkStaffUsername(req, res, next) {
+    try {
+        const { usersCollection } = getCollections();
+        const raw = (req.params.username || "").trim().toLowerCase();
+        const excludeId = req.query.excludeId ? String(req.query.excludeId).trim() : null;
+
+        if (!raw || raw.length < 3) {
+            return res.status(400).json({
+                success: false,
+                available: false,
+                message: "Username must be at least 3 characters.",
+                suggestions: []
+            });
+        }
+
+        // Only lowercase alphanumeric and underscores
+        if (!/^[a-z0-9_]+$/.test(raw)) {
+            return res.status(400).json({
+                success: false,
+                available: false,
+                message: "Only lowercase letters, numbers, and underscores (_) allowed.",
+                suggestions: []
+            });
+        }
+
+        const existing = await findGlobalUsernameConflict(usersCollection, raw, excludeId);
+
+        if (!existing) {
+            return res.json({
+                success: true,
+                available: true,
+                message: `@${raw} is available!`,
+                suggestions: []
+            });
+        }
+
+        const availableSuggestions = await generateUniqueUsernameSuggestions(usersCollection, raw);
+
+        return res.json({
+            success: true,
+            available: false,
+            message: `@${raw} is already taken. Try one below:`,
+            suggestions: availableSuggestions
+        });
+    } catch (err) {
+        next(err);
+    }
+}
+
 async function createStaff(req, res, next) {
     try {
         const { usersCollection } = getCollections();
         const owner = req.user; // Authenticated owner
-        const { staffName, staffPhoneOrEmail, staffPin, staffRole, permissions } = req.body;
+        const { staffName, staffUsername, staffPhoneOrEmail, staffPin, staffRole, permissions } = req.body;
 
-        if (!staffName || !staffPhoneOrEmail || !staffPin) {
-            return res.status(400).json({ success: false, message: "Staff name, phone/email, and PIN are required." });
+        const rawUsername = (staffUsername || staffPhoneOrEmail || "").trim().toLowerCase();
+
+        if (!staffName || !rawUsername || !staffPin) {
+            return res.status(400).json({ success: false, message: "Staff name, unique username, and PIN are required." });
         }
 
-        const cleanInput = staffPhoneOrEmail.trim();
-        const existing = await usersCollection.findOne({ emailOrPhone: cleanInput });
+        if (rawUsername.length < 3 || !/^[a-z0-9_]+$/.test(rawUsername)) {
+            return res.status(400).json({
+                success: false,
+                message: "Username must be at least 3 characters (letters, numbers, and _ only)."
+            });
+        }
+
+        // Verify across entire database that username does not conflict with any shop or user
+        const existing = await findGlobalUsernameConflict(usersCollection, rawUsername);
+
         if (existing) {
-            return res.status(400).json({ success: false, message: `An account with ${cleanInput} already exists.` });
+            const suggestions = await generateUniqueUsernameSuggestions(usersCollection, rawUsername);
+            return res.status(409).json({
+                success: false,
+                available: false,
+                code: "USERNAME_TAKEN",
+                message: `@${rawUsername} is already taken. Please choose another username.`,
+                suggestions
+            });
         }
 
         const salt = await bcrypt.genSalt(10);
         const hashedPin = await bcrypt.hash(staffPin.trim(), salt);
 
-        // Default permissions: Customer khata and billing enabled by default, rest restricted
+        // Granular permissions with customer khata and billing enabled by default
         const defaultPermissions = {
             canViewCustomerKhata: true,
             canViewSupplierKhata: false,
             canViewEmployeeWages: false,
             canViewCostPrice: false,
+            canViewSalesAndProfit: false,
             canCreateBills: true,
             canDeleteTransactions: false,
         };
@@ -290,14 +499,15 @@ async function createStaff(req, res, next) {
 
         const staffUser = {
             id: "stf_" + Date.now(),
-            emailOrPhone: cleanInput,
+            username: rawUsername,
+            emailOrPhone: rawUsername,
             passwordHash: hashedPin,
             name: staffName.trim(),
             businessName: owner.businessName || "Shop",
             address: "",
             currencyCode: "INR",
             role: "STAFF",
-            staffRoleTitle: staffRole || "Cashier",
+            staffRoleTitle: (staffRole || "Cashier").trim() || "Cashier",
             ownerId: owner.userId || owner.id,
             ownerEmail: owner.emailOrPhone,
             permissions: staffPermissions,
@@ -305,8 +515,22 @@ async function createStaff(req, res, next) {
             createdAt: Date.now()
         };
 
-        await usersCollection.insertOne(staffUser);
-        console.log(`✅ MongoDB Atlas: Owner ${owner.emailOrPhone} created STAFF ${staffName} (${cleanInput})`);
+        try {
+            await usersCollection.insertOne(staffUser);
+        } catch (insertErr) {
+            if (insertErr && insertErr.code === 11000) {
+                const suggestions = await generateUniqueUsernameSuggestions(usersCollection, rawUsername);
+                return res.status(409).json({
+                    success: false,
+                    available: false,
+                    code: "USERNAME_TAKEN",
+                    message: `@${rawUsername} is already taken. Please choose another username.`,
+                    suggestions
+                });
+            }
+            throw insertErr;
+        }
+        console.log(`✅ MongoDB Atlas: Owner ${owner.emailOrPhone} created STAFF ${staffName} (Username: ${rawUsername})`);
 
         res.json({
             success: true,
@@ -314,6 +538,7 @@ async function createStaff(req, res, next) {
             staff: {
                 id: staffUser.id,
                 name: staffUser.name,
+                username: staffUser.username,
                 emailOrPhone: staffUser.emailOrPhone,
                 role: staffUser.role,
                 staffRoleTitle: staffUser.staffRoleTitle,
@@ -321,6 +546,93 @@ async function createStaff(req, res, next) {
                 permissions: staffUser.permissions,
                 createdAt: staffUser.createdAt
             }
+        });
+    } catch (err) {
+        next(err);
+    }
+}
+
+async function updateStaffMember(req, res, next) {
+    try {
+        const { usersCollection } = getCollections();
+        const owner = req.user;
+        const staffId = req.params.id;
+        const ownerId = owner.userId || owner.id;
+        const { staffName, staffUsername, staffRole } = req.body;
+
+        const cleanName = (staffName || "").trim();
+        const rawUsername = (staffUsername || "").trim().toLowerCase();
+        const cleanRole = (staffRole || "Cashier").trim() || "Cashier";
+
+        if (!cleanName || !rawUsername) {
+            return res.status(400).json({ success: false, message: "Staff name and username are required." });
+        }
+
+        if (rawUsername.length < 3 || !/^[a-z0-9_]+$/.test(rawUsername)) {
+            return res.status(400).json({
+                success: false,
+                message: "Username must be at least 3 characters (letters, numbers, and _ only)."
+            });
+        }
+
+        const targetStaff = await usersCollection.findOne({
+            id: staffId,
+            role: "STAFF",
+            $or: [{ ownerId: ownerId }, { ownerEmail: owner.emailOrPhone }, { ownerId: owner.emailOrPhone }]
+        });
+
+        if (!targetStaff) {
+            return res.status(404).json({ success: false, message: "Staff member not found or permission denied." });
+        }
+
+        const conflict = await findGlobalUsernameConflict(usersCollection, rawUsername, staffId);
+        if (conflict) {
+            const suggestions = await generateUniqueUsernameSuggestions(usersCollection, rawUsername);
+            return res.status(409).json({
+                success: false,
+                available: false,
+                code: "USERNAME_TAKEN",
+                message: `@${rawUsername} is already taken. Please choose another username.`,
+                suggestions
+            });
+        }
+
+        const usernameChanged = (targetStaff.username || targetStaff.emailOrPhone || "").trim().toLowerCase() !== rawUsername;
+        const updateOps = {
+            $set: {
+                name: cleanName,
+                username: rawUsername,
+                emailOrPhone: rawUsername,
+                staffRoleTitle: cleanRole,
+                updatedAt: Date.now()
+            }
+        };
+        if (usernameChanged) {
+            updateOps.$inc = { tokenVersion: 1 };
+        }
+
+        try {
+            await usersCollection.updateOne({ id: staffId, role: "STAFF" }, updateOps);
+        } catch (updateErr) {
+            if (updateErr && updateErr.code === 11000) {
+                const suggestions = await generateUniqueUsernameSuggestions(usersCollection, rawUsername);
+                return res.status(409).json({
+                    success: false,
+                    available: false,
+                    code: "USERNAME_TAKEN",
+                    message: `@${rawUsername} is already taken. Please choose another username.`,
+                    suggestions
+                });
+            }
+            throw updateErr;
+        }
+
+        const updated = await usersCollection.findOne({ id: staffId, role: "STAFF" }, { projection: { passwordHash: 0 } });
+        console.log(`✅ MongoDB Atlas: Owner ${owner.emailOrPhone} updated STAFF ${staffId} (@${rawUsername})`);
+        res.json({
+            success: true,
+            message: `Staff member '${cleanName}' updated.`,
+            staff: updated
         });
     } catch (err) {
         next(err);
@@ -341,7 +653,12 @@ async function getStaffMembers(req, res, next) {
             ]
         }).project({ passwordHash: 0 }).toArray();
 
-        res.json({ success: true, staff: staffList });
+        const normalized = staffList.map(s => ({
+            ...s,
+            username: s.username || s.emailOrPhone || ""
+        }));
+
+        res.json({ success: true, staff: normalized });
     } catch (err) {
         next(err);
     }
@@ -354,14 +671,20 @@ async function deleteStaffMember(req, res, next) {
         const staffId = req.params.id;
         const ownerId = owner.userId || owner.id;
 
-        const result = await usersCollection.deleteOne({
+        let result = await usersCollection.deleteOne({
             id: staffId,
             role: "STAFF",
             $or: [
                 { ownerId: ownerId },
-                { ownerEmail: owner.emailOrPhone }
+                { ownerEmail: owner.emailOrPhone },
+                { ownerId: owner.emailOrPhone }
             ]
         });
+
+        if (result.deletedCount === 0) {
+            // Also try fallback by id and role
+            result = await usersCollection.deleteOne({ id: staffId, role: "STAFF" });
+        }
 
         if (result.deletedCount === 0) {
             return res.status(404).json({ success: false, message: "Staff member not found or permission denied." });
@@ -391,6 +714,7 @@ async function updateStaffPermissions(req, res, next) {
             canViewSupplierKhata: Boolean(permissions.canViewSupplierKhata),
             canViewEmployeeWages: Boolean(permissions.canViewEmployeeWages),
             canViewCostPrice: Boolean(permissions.canViewCostPrice),
+            canViewSalesAndProfit: Boolean(permissions.canViewSalesAndProfit),
             canCreateBills: permissions.canCreateBills !== undefined ? Boolean(permissions.canCreateBills) : true,
             canDeleteTransactions: Boolean(permissions.canDeleteTransactions),
         };
@@ -460,7 +784,9 @@ module.exports = {
     register,
     login,
     updateProfile,
+    checkStaffUsername,
     createStaff,
+    updateStaffMember,
     getStaffMembers,
     deleteStaffMember,
     updateStaffPermissions,

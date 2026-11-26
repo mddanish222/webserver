@@ -8,9 +8,11 @@ router.post('/register', authLimiter, authController.register);
 router.post('/login', authLimiter, authController.login);
 router.post('/profile', authenticateToken, authController.updateProfile);
 
-// Staff management routes (Protected, Owner only)
+// Staff management routes
+router.get('/staff/check-username/:username', authController.checkStaffUsername);
 router.post('/staff', authenticateToken, requireRole(['OWNER']), authController.createStaff);
 router.get('/staff', authenticateToken, requireRole(['OWNER']), authController.getStaffMembers);
+router.put('/staff/:id', authenticateToken, requireRole(['OWNER']), authController.updateStaffMember);
 router.delete('/staff/:id', authenticateToken, requireRole(['OWNER']), authController.deleteStaffMember);
 router.put('/staff/:id/permissions', authenticateToken, requireRole(['OWNER']), authController.updateStaffPermissions);
 router.put('/staff/:id/pin', authLimiter, authenticateToken, requireRole(['OWNER']), authController.resetStaffPin);

@@ -17,6 +17,10 @@ async function createIndexes() {
             collections.usersCollection.createIndex({ emailOrPhone: 1 }),
             collections.usersCollection.createIndex({ id: 1 }),
             collections.usersCollection.createIndex({ ownerId: 1 }),
+            collections.usersCollection.createIndex(
+                { username: 1 },
+                { unique: true, partialFilterExpression: { username: { $type: "string", $gt: "" } } }
+            ).catch(() => collections.usersCollection.createIndex({ username: 1 })),
 
             collections.transactionsCollection.createIndex({ ownerId: 1, timestamp: -1 }),
             collections.transactionsCollection.createIndex({ userEmail: 1, timestamp: -1 }),

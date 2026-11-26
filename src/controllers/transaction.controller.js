@@ -10,8 +10,14 @@ async function saveTransaction(req, res, next) {
         // Ensure transaction is tagged with the organization/owner identifier
         tx.ownerId = req.user.ownerId || req.user.userId || req.user.id;
         tx.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
-        tx.recordedBy = req.user.name || req.user.emailOrPhone;
-        tx.recordedByRole = req.user.role || 'OWNER';
+        if (req.user.role === 'STAFF') {
+            const staffTitle = req.user.staffRoleTitle || 'Staff';
+            tx.recordedBy = req.user.name ? `${req.user.name} (${staffTitle})` : (req.user.username || 'Staff');
+            tx.recordedByRole = staffTitle;
+        } else {
+            tx.recordedBy = tx.recordedBy || req.user.name || req.user.emailOrPhone || 'Owner';
+            tx.recordedByRole = tx.recordedByRole || 'OWNER';
+        }
         tx.updatedAt = Date.now();
         tx.isDeleted = false;
 

@@ -8,7 +8,14 @@ async function saveCustomer(req, res, next) {
         const cust = req.body;
         cust.ownerId = req.user.ownerId || req.user.userId || req.user.id;
         cust.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
-        cust.recordedBy = req.user.name || req.user.emailOrPhone;
+        if (req.user.role === 'STAFF') {
+            const staffTitle = req.user.staffRoleTitle || 'Staff';
+            cust.recordedBy = req.user.name ? `${req.user.name} (${staffTitle})` : (req.user.username || 'Staff');
+            cust.recordedByRole = staffTitle;
+        } else {
+            cust.recordedBy = cust.recordedBy || req.user.name || req.user.emailOrPhone || 'Owner';
+            cust.recordedByRole = cust.recordedByRole || 'OWNER';
+        }
         cust.updatedAt = Date.now();
         cust.isDeleted = false;
 
@@ -94,8 +101,14 @@ async function saveCustomerLedger(req, res, next) {
 
         entry.ownerId = req.user.ownerId || req.user.userId || req.user.id;
         entry.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
-        entry.recordedBy = req.user.name || req.user.emailOrPhone;
-        entry.recordedByRole = req.user.role || 'OWNER';
+        if (req.user.role === 'STAFF') {
+            const staffTitle = req.user.staffRoleTitle || 'Staff';
+            entry.recordedBy = req.user.name ? `${req.user.name} (${staffTitle})` : (req.user.username || 'Staff');
+            entry.recordedByRole = staffTitle;
+        } else {
+            entry.recordedBy = entry.recordedBy || req.user.name || req.user.emailOrPhone || 'Owner';
+            entry.recordedByRole = entry.recordedByRole || 'OWNER';
+        }
         entry.updatedAt = Date.now();
         entry.isDeleted = false;
 

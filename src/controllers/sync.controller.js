@@ -36,7 +36,9 @@ async function getDelta(req, res, next) {
             accountsCollection,
             suppliersCollection,
             supplierLedgersCollection,
-            stockSalesCollection
+            stockSalesCollection,
+            employeesCollection,
+            employeeTxCollection
         } = getCollections();
 
         const [
@@ -46,7 +48,9 @@ async function getDelta(req, res, next) {
             accounts,
             suppliers,
             supplierLedgers,
-            stockSales
+            stockSales,
+            employees,
+            employeeTransactions
         ] = await Promise.all([
             customersCollection.find(timeQuery).toArray(),
             ledgersCollection.find(timeQuery).toArray(),
@@ -54,16 +58,47 @@ async function getDelta(req, res, next) {
             accountsCollection.find(timeQuery).toArray(),
             suppliersCollection.find(timeQuery).toArray(),
             supplierLedgersCollection.find(timeQuery).toArray(),
-            stockSalesCollection.find(timeQuery).toArray()
+            stockSalesCollection.find(timeQuery).toArray(),
+            employeesCollection.find(timeQuery).toArray(),
+            employeeTxCollection.find(timeQuery).toArray()
         ]);
 
         const totalChanges = customers.length + customerLedgers.length + transactions.length +
-            accounts.length + suppliers.length + supplierLedgers.length + stockSales.length;
+            accounts.length + suppliers.length + supplierLedgers.length + stockSales.length +
+            employees.length + employeeTransactions.length;
+
+        // If caller is a staff member, stream the owner's latest live profile for real-time sync
+        let ownerProfile = null;
+        if (req.user && req.user.role === 'STAFF') {
+            const { usersCollection } = getCollections();
+            const ownerDoc = await usersCollection.findOne({
+                $or: [
+                    { id: req.user.ownerId },
+                    { emailOrPhone: req.user.ownerEmail },
+                    { emailOrPhone: req.user.ownerId }
+                ]
+            });
+            if (ownerDoc) {
+                ownerProfile = {
+                    businessName: ownerDoc.businessName || "",
+                    address: ownerDoc.address || "",
+                    currencyCode: ownerDoc.currencyCode || "INR",
+                    upiId: ownerDoc.upiId || "",
+                    gstin: ownerDoc.gstin || "",
+                    bankName: ownerDoc.bankName || "",
+                    bankAccountNumber: ownerDoc.bankAccountNumber || "",
+                    bankIfsc: ownerDoc.bankIfsc || "",
+                    bankBranch: ownerDoc.bankBranch || "",
+                    showStaffAuditBadge: ownerDoc.showStaffAuditBadge !== undefined ? ownerDoc.showStaffAuditBadge : true
+                };
+            }
+        }
 
         res.json({
             success: true,
             serverTime: now,
-            hasChanges: totalChanges > 0,
+            hasChanges: totalChanges > 0 || ownerProfile !== null,
+            ownerProfile,
             delta: {
                 customers,
                 customerLedgers,
@@ -71,7 +106,9 @@ async function getDelta(req, res, next) {
                 accounts,
                 suppliers,
                 supplierLedgers,
-                stockSales
+                stockSales,
+                employees,
+                employeeTransactions
             }
         });
     } catch (err) {

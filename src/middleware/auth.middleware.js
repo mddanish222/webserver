@@ -46,6 +46,15 @@ async function authenticateToken(req, res, next) {
             if (liveUser.permissions) {
                 req.user.permissions = liveUser.permissions;
             }
+            if (liveUser.name) {
+                req.user.name = liveUser.name;
+            }
+            if (liveUser.staffRoleTitle) {
+                req.user.staffRoleTitle = liveUser.staffRoleTitle;
+            }
+            if (liveUser.username) {
+                req.user.username = liveUser.username;
+            }
         }
 
         next();

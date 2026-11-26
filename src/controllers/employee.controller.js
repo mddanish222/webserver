@@ -5,13 +5,18 @@ const { getTenantIdentifiers } = require('../middleware/auth.middleware');
 async function saveEmployee(req, res, next) {
     try {
         if (req.user && req.user.role === 'STAFF') {
-            return res.status(403).json({ success: false, message: "Staff accounts cannot manage employees." });
+            const hasPerm = req.user.permissions && req.user.permissions.canViewEmployeeWages;
+            if (!hasPerm) {
+                return res.status(403).json({ success: false, message: "Staff accounts cannot manage employees without permission." });
+            }
         }
 
         const { employeesCollection } = getCollections();
         const emp = req.body;
         emp.ownerId = req.user.ownerId || req.user.userId || req.user.id;
         emp.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
+        emp.updatedAt = Date.now();
+        emp.isDeleted = false;
 
         await employeesCollection.updateOne({ id: emp.id }, { $set: emp }, { upsert: true });
         console.log(`✅ MongoDB Atlas: Employee saved ${emp.name}`);
@@ -24,7 +29,10 @@ async function saveEmployee(req, res, next) {
 async function getEmployees(req, res, next) {
     try {
         if (req.user && req.user.role === 'STAFF') {
-            return res.status(403).json({ success: false, message: "Staff accounts cannot access employee payroll." });
+            const hasPerm = req.user.permissions && req.user.permissions.canViewEmployeeWages;
+            if (!hasPerm) {
+                return res.status(403).json({ success: false, message: "Staff accounts cannot access employee payroll without permission." });
+            }
         }
 
         const { employeesCollection } = getCollections();
@@ -87,13 +95,18 @@ async function deleteEmployee(req, res, next) {
 async function saveEmployeeTransaction(req, res, next) {
     try {
         if (req.user && req.user.role === 'STAFF') {
-            return res.status(403).json({ success: false, message: "Staff accounts cannot manage employee payroll." });
+            const hasPerm = req.user.permissions && req.user.permissions.canViewEmployeeWages;
+            if (!hasPerm) {
+                return res.status(403).json({ success: false, message: "Staff accounts cannot manage employee payroll without permission." });
+            }
         }
 
         const { employeeTxCollection } = getCollections();
         const tx = req.body;
         tx.ownerId = req.user.ownerId || req.user.userId || req.user.id;
         tx.userEmail = req.user.ownerEmail || req.user.emailOrPhone;
+        tx.updatedAt = Date.now();
+        tx.isDeleted = false;
 
         await employeeTxCollection.updateOne({ id: tx.id }, { $set: tx }, { upsert: true });
         console.log(`✅ MongoDB Atlas: Employee Tx saved ${tx.type} for employee ${tx.employeeId}`);
@@ -106,7 +119,10 @@ async function saveEmployeeTransaction(req, res, next) {
 async function getEmployeeTransactions(req, res, next) {
     try {
         if (req.user && req.user.role === 'STAFF') {
-            return res.status(403).json({ success: false, message: "Staff accounts cannot access employee payroll." });
+            const hasPerm = req.user.permissions && req.user.permissions.canViewEmployeeWages;
+            if (!hasPerm) {
+                return res.status(403).json({ success: false, message: "Staff accounts cannot access employee payroll without permission." });
+            }
         }
 
         const { employeeTxCollection } = getCollections();
