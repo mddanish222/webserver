@@ -63,6 +63,24 @@ async function updateReminder(req, res, next) {
         if (body.messageText !== undefined) {
             updateFields.messageText = String(body.messageText);
         }
+        if (body.channel !== undefined) {
+            updateFields.channel = String(body.channel);
+        }
+        if (body.shopName !== undefined) {
+            updateFields.shopName = String(body.shopName);
+        }
+        if (body.ownerName !== undefined) {
+            updateFields.ownerName = String(body.ownerName);
+        }
+        if (body.currencySymbol !== undefined) {
+            updateFields.currencySymbol = String(body.currencySymbol);
+        }
+        if (body.appDownloadLink !== undefined) {
+            updateFields.appDownloadLink = String(body.appDownloadLink);
+        }
+        if (body.isAutoCancelled !== undefined) {
+            updateFields.isAutoCancelled = Boolean(body.isAutoCancelled);
+        }
         if (body.customerName !== undefined) {
             updateFields.customerName = String(body.customerName);
         }
