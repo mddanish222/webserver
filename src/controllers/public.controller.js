@@ -68,14 +68,17 @@ async function renderPassbook(req, res) {
             }
         }
 
-        const shopUpiId = (req.query.upi || (owner && owner.upiId) || DEFAULT_UPI_ID || '').trim();
+        const currencyCode = (owner && owner.currencyCode) ? String(owner.currencyCode).toUpperCase() : 'INR';
+        const currencySymbol = CURRENCY_SYMBOLS[currencyCode] || '₹';
+        const isIndiaInr = currencyCode === 'INR';
+        const shopUpiId = isIndiaInr
+            ? (req.query.upi || (owner && owner.upiId) || DEFAULT_UPI_ID || '').trim()
+            : '';
         const shopNameStr = (owner && owner.businessName && owner.businessName.trim())
             ? owner.businessName.trim()
             : 'Shop';
         const ownerNameStr = (owner && owner.name && owner.name.trim()) ? owner.name.trim() : '';
         const shopAddressStr = (owner && owner.address && owner.address.trim()) ? owner.address.trim() : '';
-        const currencyCode = (owner && owner.currencyCode) ? String(owner.currencyCode).toUpperCase() : 'INR';
-        const currencySymbol = CURRENCY_SYMBOLS[currencyCode] || '₹';
 
         const ownerPhoneInfo = extractValidPhone([
             owner && owner.phoneNumber,
